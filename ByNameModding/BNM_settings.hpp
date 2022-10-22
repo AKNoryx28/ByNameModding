@@ -63,7 +63,7 @@ auto HOOK = [](auto ptr, auto newMethod, auto&& oldBytes) {
 #include <dobby.h>
 auto HOOK = [](auto ptr, auto newMethod, auto&& oldBytes) {
     if (((void *)ptr) != nullptr)
-        DobbyHook((void *)ptr, (void *) newMethod, (void **) &oldBytes);
+        DobbyHook((void *)ptr, (dobby_dummy_func_t) newMethod, (dobby_dummy_func_t *) &oldBytes);
 };
 
 // For System.Collections.Generic.Dictionary
