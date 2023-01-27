@@ -12,16 +12,14 @@ static DWORD BNM_LibAbsoluteAddress{};
 static bool HasImageGetCls = false;
 BNM::AssemblyVector *(*Assembly$$GetAllAssemblies)(){};
 #if __cplusplus >= 201703 && !BNM_DISABLE_NEW_CLASSES // Speed up IDE if c++ lower then c++17
-void Image$$GetTypes(BNM::IL2CPP::Il2CppImage* image, bool exportedOnly, BNM::TypeVector* target);
-void (*old_Image$$GetTypes)(BNM::IL2CPP::Il2CppImage* image, bool exportedOnly, BNM::TypeVector* target){};
 BNM::IL2CPP::Il2CppClass* (*old_Class$$FromIl2CppType)(BNM::IL2CPP::Il2CppType* type){};
 BNM::IL2CPP::Il2CppClass* Class$$FromIl2CppType(BNM::IL2CPP::Il2CppType* type);
 BNM::IL2CPP::Il2CppClass* (*old_Class$$FromName)(BNM::IL2CPP::Il2CppImage* image, const char* ns, const char *name){};
 BNM::IL2CPP::Il2CppClass* Class$$FromName(BNM::IL2CPP::Il2CppImage* image, const char* _namespace, const char *name);
 static std::vector<BNM::NEW_CLASSES::NewClass *> *Classes4Add{};
-#else
-void (*Image$$GetTypes)(BNM::IL2CPP::Il2CppImage* image, bool exportedOnly, TypeVector* target){};
 #endif
+void (*old_Image$$GetTypes)(BNM::IL2CPP::Il2CppImage* image, bool exportedOnly, BNM::TypeVector* target){};
+void Image$$GetTypes(BNM::IL2CPP::Il2CppImage* image, bool exportedOnly, BNM::TypeVector* target);
 void (*Class$$Init)(BNM::IL2CPP::Il2CppClass *klass){};
 
 void *get_il2cpp() { return BNM_dlLib; }
@@ -234,7 +232,7 @@ BNM::Method<void> BNM::LoadClass::GetMethodByName(const std::string& name, const
     std::vector<IL2CPP::MethodInfo*> ret;
     auto curClass = klass;
     do {
-        for (int i = 0; i < curClass->method_count; ++i) ret.emplace_back(BNM::Method(curClass->methods[i]).GetInfo());
+        for (int i = 0; i < curClass->method_count; ++i) ret.emplace_back(BNM::Method<void>(curClass->methods[i]).GetInfo());
         if (includeParent) curClass = curClass->parent;
         else curClass = nullptr;
     } while (curClass);
@@ -575,24 +573,6 @@ BNM::IL2CPP::Il2CppClass* Class$$FromName(BNM::IL2CPP::Il2CppImage* image, const
         });
     return ret;
 }
-void Image$$GetTypes(BNM::IL2CPP::Il2CppImage* image, bool, BNM::TypeVector* target) {
-    if (!image || !target) return;
-    if (image->nameToClassHashTable != (decltype(image->nameToClassHashTable))-0x424e4d) {
-        if (HasImageGetCls) {
-            DO_API(BNM::IL2CPP::Il2CppClass*, il2cpp_image_get_class, (BNM::IL2CPP::Il2CppImage*, decltype(image->typeCount)));
-            auto typeCount = image->typeCount;
-            for (decltype(image->typeCount) i = 0; i < typeCount; ++i) {
-                auto type = il2cpp_image_get_class(image, i);
-                if (OBFUSCATES_BNM("<Module>") == type->name) continue;
-                target->push_back(type);
-            }
-        } else old_Image$$GetTypes(image, false, target);
-    }
-    BNMClassesMap.forEachByImage(image, [&target](BNM::IL2CPP::Il2CppClass *BNM_class) -> bool {
-        target->push_back(BNM_class);
-        return false;
-    });
-}
 // Need due Image and Assembly in 2017.x- has index instead of pointer to Image and Assembly
 #if UNITY_VER <= 174
 BNM::IL2CPP::Il2CppImage*(*old_GetImageFromIndex)(BNM::IL2CPP::ImageIndex index);
@@ -673,21 +653,37 @@ void InitNewClasses() {
                 if (method->isStatic) method->thisMethod->flags |= 0x0010; // PUBLIC | HIDE_BY_SIG | (isStatic ? STATIC : NONE)
                 method->thisMethod->is_generic = false;
                 method->thisMethod->return_type = method->ret_type.ToIl2CppType();
+                if (method->argsCount) {
 #if UNITY_VER < 212
-                for (int p = 0; p < method->argsCount; ++p) {
-                    auto newParam = BNM_I2C_NEW(ParameterInfo);
-                    auto nameLen = (OBFUSCATES_BNM("arg") + std::to_string(p)).size();
-                    newParam->name = new char[nameLen + 1];
-                    memset((void*)newParam->name, 0, nameLen + 1);
-                    strcat((char*)newParam->name, OBFUSCATE_BNM("arg"));
-                    strcpy((char*)newParam->name, std::to_string(p).c_str());
-                    newParam->position = p;
-                    if (method->args_types && !method->args_types->empty() && p < method->args_types->size())
-                        newParam->parameter_type = (*method->args_types)[p].ToIl2CppType();
-                }
+                    method->thisMethod->parameters = (BNM::IL2CPP::ParameterInfo*)calloc(method->argsCount, sizeof(BNM::IL2CPP::ParameterInfo));
+                    auto newParam = (BNM::IL2CPP::ParameterInfo*)method->thisMethod->parameters;
+                    for (int p = 0; p < method->argsCount; ++p) {
+                        auto nameLen = (OBFUSCATES_BNM("arg") + std::to_string(p)).size();
+                        newParam->name = new char[nameLen + 1];
+                        memset((void*)newParam->name, 0, nameLen + 1);
+                        strcat((char*)newParam->name, OBFUSCATE_BNM("arg"));
+                        strcpy((char*)newParam->name, std::to_string(p).c_str());
+                        newParam->position = p;
+                        if (method->args_types && !method->args_types->empty() && p < method->args_types->size()) {
+                            newParam->parameter_type = (*method->args_types)[p].ToIl2CppType();
+                            newParam->token = newParam->parameter_type->attrs | 1;
+                        } else {
+                            newParam->parameter_type = nullptr;
+                            newParam->token = 1;
+                        }
+                        ++newParam;
+                    }
 #else
-                method->thisMethod->parameters = nullptr;
+                    BNM::IL2CPP::Il2CppType **params = new BNM::IL2CPP::Il2CppType*[method->argsCount];
+                    method->thisMethod->parameters = (const BNM::IL2CPP::Il2CppType**)params;
+                    for (int p = 0; p < method->argsCount; ++p) {
+                        auto newParam = BNM_I2C_NEW(Il2CppType);
+                        memcpy(newParam, (*method->args_types)[p].ToIl2CppType(), sizeof(BNM::IL2CPP::Il2CppType));
+                        newParam->data.dummy = nullptr;
+                        params[p] = newParam;
+                    }
 #endif
+                }
                 methods[i] = method->thisMethod;
             }
         }
@@ -848,7 +844,26 @@ void InitNewClasses() {
     Classes4Add->clear();
 }
 #endif
-
+void Image$$GetTypes(BNM::IL2CPP::Il2CppImage* image, bool, BNM::TypeVector* target) {
+    if (!image || !target) return;
+    if (image->nameToClassHashTable != (decltype(image->nameToClassHashTable))-0x424e4d) {
+        if (HasImageGetCls) {
+            DO_API(BNM::IL2CPP::Il2CppClass*, il2cpp_image_get_class, (BNM::IL2CPP::Il2CppImage*, decltype(image->typeCount)));
+            auto typeCount = image->typeCount;
+            for (decltype(image->typeCount) i = 0; i < typeCount; ++i) {
+                auto type = il2cpp_image_get_class(image, i);
+                if (OBFUSCATES_BNM("<Module>") == type->name) continue;
+                target->push_back(type);
+            }
+        } else old_Image$$GetTypes(image, false, target);
+    }
+#if __cplusplus >= 201703 && !BNM_DISABLE_NEW_CLASSES
+    BNMClassesMap.forEachByImage(image, [&target](BNM::IL2CPP::Il2CppClass *BNM_class) -> bool {
+        target->push_back(BNM_class);
+        return false;
+    });
+#endif
+}
 namespace BNM::HexUtils {
     std::string ReverseHexString(const std::string &hex) {
         std::string out;
@@ -963,11 +978,7 @@ void InitIl2cppMethods() {
     }
 
     //! il2cpp::vm::Image::GetTypes HOOK AND GET (OR ONLY GET)
-#if __cplusplus >= 201703 && !BNM_DISABLE_NEW_CLASSES
     if (!old_Image$$GetTypes && !HasImageGetCls) {
-#else
-    if (!Image$$GetTypes && !HasImageGetCls) {
-#endif
         DO_API(const BNM::IL2CPP::Il2CppImage*, il2cpp_get_corlib, ());
         DO_API(BNM::IL2CPP::Il2CppClass*, il2cpp_class_from_name, (const BNM::IL2CPP::Il2CppImage*, const char*, const char *));
         DWORD GetTypesAdr = 0;
@@ -985,7 +996,7 @@ void InitIl2cppMethods() {
 #if __cplusplus >= 201703 && !BNM_DISABLE_NEW_CLASSES
         HOOK(Image$$GetTypes_t, Image$$GetTypes, old_Image$$GetTypes);
 #else
-        Image$$GetTypes = (decltype(Image$$GetTypes)) Image$$GetTypes_t;
+        old_Image$$GetTypes = (decltype(old_Image$$GetTypes)) Image$$GetTypes_t;
 #endif
         LOGDBNM(OBFUSCATE_BNM("[InitIl2cppMethods] il2cpp::vm::Image::GetTypes in lib: %p"), BNM::offsetInLib((void *)Image$$GetTypes_t));
     } else if (HasImageGetCls) {
